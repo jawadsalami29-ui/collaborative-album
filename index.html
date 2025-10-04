@@ -6,7 +6,7 @@
     <title>Kollaboratives Buch-Fotoalbum</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=Playfair+Display:wght@700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=Playfair+Display:wght{700}&display=swap');
 
         body {
             font-family: 'Inter', sans-serif;
@@ -138,12 +138,10 @@
         const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
         
-        // NEUE KONSTANTEN FÜR DIE KORRIGIERTE PFADSTRUKTUR
-        // 4 Segmente: Der Pfad zum Parent-Dokument, das die Sammlung enthält.
+        // KONSTANTEN FÜR DEN ÖFFENTLICHEN PFAD
         const ALBUM_ROOT_DOC_PATH = `artifacts/${appId}/public/data`; 
-        // Der Name der Sub-Sammlung
         const ALBUM_COLLECTION_NAME = 'album_book_v3';
-        // Der vollständige Pfadstring (für doc(db, path, id))
+        // Der vollständige 5-Segment-Pfad, der als Collection behandelt wird
         const FULL_COLLECTION_PATH_STRING = `${ALBUM_ROOT_DOC_PATH}/${ALBUM_COLLECTION_NAME}`;
 
         // Die Firestore Collection Reference, die wir für alle Operationen nutzen
@@ -278,9 +276,11 @@
                 userId = auth.currentUser?.uid || crypto.randomUUID();
                 document.getElementById('status-message').textContent = `Album-ID (für alle Nutzer): ${appId}`;
                 
-                // NEU: COLLECTION REFERENCE KORREKT ERSTELLEN
-                const rootDocRef = doc(db, ALBUM_ROOT_DOC_PATH); // Parent Document (4 Segmente)
-                albumCollectionRef = collection(rootDocRef, ALBUM_COLLECTION_NAME); // Sub-Collection (5 Segmente)
+                // KERN-FIX: Wir nutzen den vollständigen Pfad (5 Segmente) direkt,
+                // um die Sammlung zu initialisieren, da dies eine ungerade Anzahl von Segmenten hat,
+                // was für eine Sammlung korrekt ist, die in ein übergeordnetes Dokument eingebettet ist.
+                // Dies sollte den Fehler "Document references must have an even number of segments" beheben.
+                albumCollectionRef = collection(db, FULL_COLLECTION_PATH_STRING);
 
                 startAlbumListener();
                 setUploadMode(uploadMode); // Set initial form visibility
