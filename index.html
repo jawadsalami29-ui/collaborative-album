@@ -501,6 +501,8 @@
                     base64Url = await fetchImageAsBase64(url);
                 }
                 
+                console.log("Starte Firestore addDoc für Slot:", slotIndex); // NEUES LOG
+                
                 // 4. Add document to Firestore
                 await addDoc(collection(db, collectionPath), {
                     url: base64Url,
@@ -512,6 +514,8 @@
                     slotIndex: slotIndex // MANDATORY for rendering order
                 });
 
+                console.log("Firestore addDoc erfolgreich."); // NEUES LOG
+
                 // Clear input fields
                 if (uploadMode === 'file') {
                     document.getElementById('photo-file').value = '';
@@ -522,7 +526,7 @@
                 alertModal(`Foto erfolgreich zu Seite ${pageNumber}, Platz ${slotNumber} hinzugefügt!`, null);
 
             } catch (e) {
-                console.error("Fehler beim Hinzufügen des Dokuments: ", e);
+                console.error("Fehler beim Hinzufügen des Dokuments (Detail): ", e); // VERBESSERTES LOGGING
                 
                 // Überprüfe, ob der Fehler bereits eine spezifische Modalausgabe in den Helfern hatte (z.B. Dateigröße, URL-Fehler).
                 const isSizeError = e.message.includes("File too large") || e.message.includes("URL too large");
@@ -534,8 +538,9 @@
                     if (e.message.includes("Bitte wähle eine Bilddatei aus") || e.message.includes("Bitte gib eine gültige Bild-URL ein")) {
                          alertModal(e.message, null);
                     } else {
-                        // Generischer Fehler beim Speichern (z.B. Firestore-Fehler)
-                        alertModal(`Fehler beim Speichern des Fotos. Bitte überprüfe deine Internetverbindung und versuche es erneut. (Fehlercode: ${e.name || 'Error'})`, null);
+                        // Generischer Fehler beim Speichern (z.B. Firestore-Fehler/Netzwerk-Timeout)
+                        // VERBESSERTE FEHLERMELDUNG: Zeigt jetzt e.message an
+                        alertModal(`Fehler beim Speichern des Fotos. Möglicherweise ein Netzwerkproblem oder zu große Daten. Details: ${e.message || 'Unbekannter Fehler'}`, null);
                     }
                 }
             } finally {
