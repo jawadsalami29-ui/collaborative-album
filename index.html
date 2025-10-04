@@ -122,18 +122,28 @@
         const albumData = new Array(totalSlots).fill(null); // Array zur Speicherung aller Bilder
 
         // Defensives Laden der globalen Variablen
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-album-id';
-        // Fehlerbehandlung beim Parsen ist wichtig, um den weißen Bildschirm zu vermeiden
-        let firebaseConfig = null;
-        try {
-            if (typeof __firebase_config !== 'undefined' && __firebase_config) {
-                firebaseConfig = JSON.parse(__firebase_config);
-            }
-        } catch (e) {
-            console.error("Fehler beim Parsen der Firebase-Konfiguration:", e);
-        }
+        // WICHTIG: Prüfen, ob die Variablen definiert sind. Wenn nicht (z.B. auf GitHub Pages), Fallback-Werte verwenden.
         
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        const isExternalEnvironment = typeof __app_id === 'undefined';
+        
+        const appId = isExternalEnvironment ? 'default-album-id-fallback' : __app_id;
+        let firebaseConfig = null;
+        const initialAuthToken = isExternalEnvironment ? null : __initial_auth_token;
+        
+        if (isExternalEnvironment) {
+             // DUMMY-KONFIGURATION FÜR DEN FALL, DASS DIE UMGEBUNGSVARIABLEN FEHLEN
+             // Das verhindert den JavaScript-Absturz. Die Datenbank-Funktionen werden fehlschlagen,
+             // aber die UI wird geladen und die Fehler werden angezeigt.
+             firebaseConfig = { apiKey: "DUMMY-API-KEY", projectId: "dummy-project-id" };
+        } else {
+             try {
+                if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+                    firebaseConfig = JSON.parse(__firebase_config);
+                }
+             } catch (e) {
+                console.error("Fehler beim Parsen der Firebase-Konfiguration:", e);
+             }
+        }
         
         const FULL_COLLECTION_PATH_STRING = `artifacts/${appId}/public/data/album_book_v4`; 
         let albumCollectionRef; 
@@ -241,7 +251,7 @@
 
             } catch (error) {
                 console.error("Firebase Initialisierung fehlgeschlagen:", error);
-                const errorMsg = `Kritischer Fehler bei der Firebase-Verbindung: ${error.message}`;
+                const errorMsg = `Kritischer Fehler bei der Firebase-Verbindung: ${error.message}. (Läuft die App auf GitHub Pages? Dann ist das normal.)`;
                 document.getElementById('status-message').textContent = errorMsg;
                 document.getElementById('page-left').innerHTML = `<h2 class="text-2xl font-semibold page-header">Verbindungsfehler</h2><p class="text-red-500 p-4">${errorMsg}</p>`;
                 document.getElementById('page-right').classList.add('hidden');
@@ -278,7 +288,7 @@
                 renderBook(); // Buchseiten neu rendern
             }, (error) => {
                 console.error("Fehler beim Abrufen der Fotos:", error);
-                document.getElementById('page-left').innerHTML = `<p class="text-red-500 p-4">Fehler beim Laden des Albums (Sicherheitsregel-Fehler?).</p>`;
+                document.getElementById('page-left').innerHTML = `<h2 class="text-2xl font-semibold page-header">Datenbank Fehler</h2><p class="text-red-500 p-4">Fehler beim Laden des Albums (Sicherheitsregel-Fehler oder Verbindungsfehler?).</p>`;
             });
         }
 
@@ -302,7 +312,7 @@
                  pageRightEl.classList.remove('hidden');
             }
             
-            document.getElementById('current-page-display').textContent = `Seite ${leftPageNum} / ${TOTAL_AGES}`;
+            document.getElementById('current-page-display').textContent = `Seite ${leftPageNum} / ${TOTAL_PAGES}`;
             
             // Lösch-Listener nach dem Rendern anhängen
             attachDeleteListeners();
@@ -435,7 +445,7 @@
             }
             
             if (!albumCollectionRef) {
-                 alertModal("Album-Verbindung wird noch initialisiert. Bitte warten Sie einen Moment.", null);
+                 alertModal("Album-Verbindung wird noch initialisiert. Datenbank nicht verfügbar.", null);
                  return;
             }
 
