@@ -112,37 +112,39 @@
         // Globale Zustände und Konstanten
         let app, db, auth;
         let userId = 'loading';
-        let currentPage = 0; // Index des aktuellen sichtbaren Seitensatzes (0 bis 19)
+        let currentPage = 0; 
         let currentUploadContext = { page: null, slot: null, mode: 'file' }; 
 
         const TOTAL_PAGES = 40; 
         const IMAGES_PER_PAGE = 6;
         const MAX_SIZE = 500 * 1024; // 500KB Limit
         const totalSlots = TOTAL_PAGES * IMAGES_PER_PAGE; 
-        const albumData = new Array(totalSlots).fill(null); // Array zur Speicherung aller Bilder
-
-        // Defensives Laden der globalen Variablen
-        // WICHTIG: Prüfen, ob die Variablen definiert sind. Wenn nicht (z.B. auf GitHub Pages), Fallback-Werte verwenden.
+        const albumData = new Array(totalSlots).fill(null); 
         
-        const isExternalEnvironment = typeof __app_id === 'undefined';
-        
-        const appId = isExternalEnvironment ? 'default-album-id-fallback' : __app_id;
+        // NEU: Absolut sicheres Abrufen der globalen Variablen aus dem window-Objekt
+        const appId = window.__app_id || 'default-album-id-fallback';
         let firebaseConfig = null;
-        const initialAuthToken = isExternalEnvironment ? null : __initial_auth_token;
+        let initialAuthToken = window.__initial_auth_token || null;
         
-        if (isExternalEnvironment) {
-             // DUMMY-KONFIGURATION FÜR DEN FALL, DASS DIE UMGEBUNGSVARIABLEN FEHLEN
-             // Das verhindert den JavaScript-Absturz. Die Datenbank-Funktionen werden fehlschlagen,
-             // aber die UI wird geladen und die Fehler werden angezeigt.
-             firebaseConfig = { apiKey: "DUMMY-API-KEY", projectId: "dummy-project-id" };
-        } else {
+        // Parsen der Konfiguration (wenn vorhanden)
+        if (window.__firebase_config) {
              try {
-                if (typeof __firebase_config !== 'undefined' && __firebase_config) {
-                    firebaseConfig = JSON.parse(__firebase_config);
-                }
+                firebaseConfig = JSON.parse(window.__firebase_config);
              } catch (e) {
                 console.error("Fehler beim Parsen der Firebase-Konfiguration:", e);
              }
+        }
+
+        // Falls Konfiguration fehlt (z.B. auf GitHub Pages), eine Dummy-Konfiguration setzen,
+        // um den Aufruf von initializeApp() nicht abstürzen zu lassen.
+        if (!firebaseConfig) {
+            firebaseConfig = { 
+                apiKey: "DUMMY-API-KEY", 
+                projectId: "dummy-project-id",
+                // HINWEIS: Dies ist eine Minimal-Konfiguration, die nur den Absturz verhindert. 
+                // Die Datenbankverbindung wird fehlschlagen.
+            };
+            initialAuthToken = null; // Kein Token ohne echte Konfig.
         }
         
         const FULL_COLLECTION_PATH_STRING = `artifacts/${appId}/public/data/album_book_v4`; 
@@ -218,12 +220,11 @@
          * Initialisiert Firebase und authentifiziert den Benutzer.
          */
         async function initializeAppAndAuth() {
-            if (!firebaseConfig) {
-                const errorMsg = "Fehler: Firebase Konfiguration fehlt. Das Album kann nicht geladen werden.";
+            if (!firebaseConfig || firebaseConfig.apiKey === "DUMMY-API-KEY") {
+                const errorMsg = "Fehler: Firebase Konfiguration fehlt. Das Album kann nicht geladen werden. (Keine Datenbankverbindung)";
                 console.error(errorMsg);
                 document.getElementById('status-message').textContent = errorMsg;
-                // Zeige die Fehlermeldung auf der UI an, um den weißen Bildschirm zu vermeiden
-                document.getElementById('page-left').innerHTML = `<h2 class="text-2xl font-semibold page-header">Initialisierungsfehler</h2><p class="text-red-500 p-4">${errorMsg}</p>`;
+                document.getElementById('page-left').innerHTML = `<h2 class="text-2xl font-semibold page-header">Initialisierungsfehler</h2><p class="text-red-500 p-4 font-bold">${errorMsg}</p>`;
                 document.getElementById('page-right').classList.add('hidden');
                 return;
             }
@@ -250,10 +251,10 @@
                 startAlbumListener();
 
             } catch (error) {
-                console.error("Firebase Initialisierung fehlgeschlagen:", error);
-                const errorMsg = `Kritischer Fehler bei der Firebase-Verbindung: ${error.message}. (Läuft die App auf GitHub Pages? Dann ist das normal.)`;
+                console.error("Firebase Initialisierung/Auth fehlgeschlagen:", error);
+                const errorMsg = `Kritischer Fehler bei der Firebase-Verbindung: ${error.message}`;
                 document.getElementById('status-message').textContent = errorMsg;
-                document.getElementById('page-left').innerHTML = `<h2 class="text-2xl font-semibold page-header">Verbindungsfehler</h2><p class="text-red-500 p-4">${errorMsg}</p>`;
+                document.getElementById('page-left').innerHTML = `<h2 class="text-2xl font-semibold page-header">Verbindungsfehler</h2><p class="text-red-500 p-4 font-bold">${errorMsg}</p>`;
                 document.getElementById('page-right').classList.add('hidden');
             }
         }
@@ -264,7 +265,7 @@
         function startAlbumListener() {
             if (!albumCollectionRef) {
                 console.error("Album Collection Reference ist undefiniert.");
-                document.getElementById('page-left').innerHTML = `<p class="text-red-500 p-4">Fehler: Datenbank nicht verbunden.</p>`;
+                document.getElementById('page-left').innerHTML = `<h2 class="text-2xl font-semibold page-header">Datenbank Fehler</h2><p class="text-red-500 p-4 font-bold">Fehler: Datenbank nicht verbunden.</p>`;
                 return;
             }
 
@@ -288,7 +289,7 @@
                 renderBook(); // Buchseiten neu rendern
             }, (error) => {
                 console.error("Fehler beim Abrufen der Fotos:", error);
-                document.getElementById('page-left').innerHTML = `<h2 class="text-2xl font-semibold page-header">Datenbank Fehler</h2><p class="text-red-500 p-4">Fehler beim Laden des Albums (Sicherheitsregel-Fehler oder Verbindungsfehler?).</p>`;
+                document.getElementById('page-left').innerHTML = `<h2 class="text-2xl font-semibold page-header">Datenbank Fehler</h2><p class="text-red-500 p-4 font-bold">Fehler beim Laden des Albums (Sicherheitsregel-Fehler oder Verbindungsfehler?).</p>`;
             });
         }
 
@@ -673,13 +674,12 @@
 
         // --- Event Listeners und Initialer Ladevorgang ---
         window.onload = () => {
-            // Die Initialisierung von Firebase kann fehlschlagen, wird aber jetzt defensiv gehandhabt.
             initializeAppAndAuth();
             
             document.getElementById('prev-page').addEventListener('click', () => navigatePage(-1));
             document.getElementById('next-page').addEventListener('click', () => navigatePage(1));
             
-            // Initiales Rendern (wird vom Listener überschrieben, falls erfolgreich)
+            // Initiales Rendern
             renderBook();
             updateNavigationButtons();
         };
@@ -701,11 +701,11 @@
 
         <!-- Die Buchstruktur -->
         <div class="book">
-            <!-- Die Seiten bleiben leer, bis das Skript sie füllt. -->
+            <!-- WICHTIG: Standardinhalt für den Fall, dass JS abstürzt, aber das sollte jetzt behoben sein. -->
             <div id="page-left" class="page left-page shadow-2xl">
                 <div class="p-8 text-center text-gray-500">
-                    <p>Lade Album...</p>
-                    <p class="mt-4 text-xs text-red-400">Falls dieser Text bleibt, liegt ein Initialisierungsfehler vor. Bitte überprüfe die Konsole.</p>
+                    <p class="text-xl font-bold">Lade Album...</p>
+                    <p class="mt-4 text-xs text-red-400">Prüfe die Konsole auf Firebase-Fehler.</p>
                 </div>
             </div>
             <div id="page-right" class="page right-page shadow-2xl">
