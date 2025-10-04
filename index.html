@@ -115,9 +115,7 @@
     <script type="module">
         // --- Firebase & App Configuration ---
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        // Sicherstellen, dass getAuth, signInWithCustomToken, signInAnonymously korrekt importiert werden
         import { getAuth, signInWithCustomToken, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        // WICHTIG: deleteDoc und doc für die Löschfunktion importiert
         import { getFirestore, collection, query, onSnapshot, addDoc, serverTimestamp, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
@@ -138,11 +136,10 @@
         const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
         
-        // KONSTANTEN FÜR DEN ÖFFENTLICHEN PFAD
-        const ALBUM_ROOT_DOC_PATH = `artifacts/${appId}/public/data`; 
-        const ALBUM_COLLECTION_NAME = 'album_book_v3';
-        // Der vollständige 5-Segment-Pfad, der als Collection behandelt wird
-        const FULL_COLLECTION_PATH_STRING = `${ALBUM_ROOT_DOC_PATH}/${ALBUM_COLLECTION_NAME}`;
+        // KERN-FIX: Korrigierter 5-Segment-Pfad für öffentliche Sammlungen
+        // Ein Firestore-Sammlungspfad MUSS eine UNGERADE Anzahl von Segmenten haben (C/D/C/D/C...).
+        // Die Struktur artifacts/{appId}/public/data/album_book_v4 ist die korrekte C/D/C/D/C-Struktur für eine öffentliche Sammlung.
+        const FULL_COLLECTION_PATH_STRING = `artifacts/${appId}/public/data/album_book_v4`; 
 
         // Die Firestore Collection Reference, die wir für alle Operationen nutzen
         let albumCollectionRef; 
@@ -150,7 +147,6 @@
 
         /**
          * Converts a Base64 string to its approximate original size in bytes.
-         * Note: Base64 strings are about 33% larger than the raw binary data.
          */
         function base64ToByteSize(base64) {
             // Remove the data URI part ("data:image/jpeg;base64,")
@@ -168,11 +164,9 @@
                 reader.onload = () => {
                     const base64Url = reader.result;
                     const base64ByteSize = base64ToByteSize(base64Url);
-
-                    // NEUES LOGGING: Protokolliert die berechnete Base64-Größe
+                    
                     console.log(`[Upload-Check] Base64-Größe nach Konvertierung: ${(base64ByteSize / 1024).toFixed(2)} KB.`);
                     
-                    // Check Base64 string size after conversion
                     if (base64ByteSize > MAX_SIZE) { 
                         alertModal(`Die Datei ist zu groß (${(file.size / 1024 / 1024).toFixed(2)}MB). Maximal 500KB erlaubt.`, null);
                         reject(new Error("File too large."));
@@ -182,14 +176,12 @@
                 };
                 reader.onerror = error => reject(error);
                 
-                // Preliminary check on raw file size
-                if (file.size > MAX_SIZE * 1.5) { // Check raw size as well (with some buffer)
+                if (file.size > MAX_SIZE * 1.5) { 
                     alertModal(`Die Datei ist zu groß (Rohgröße ${(file.size / 1024 / 1024).toFixed(2)}MB). Maximal 500KB erlaubt.`, null);
                     reject(new Error("File too large."));
                     return;
                 }
                 
-                // NEUES LOGGING: Protokolliert die Rohgröße vor der Konvertierung
                 console.log(`[Upload-Check] Rohgröße der Datei: ${(file.size / 1024).toFixed(2)} KB.`);
 
 
@@ -203,7 +195,7 @@
         async function fetchImageAsBase64(url) {
             try {
                 // 1. Fetch the image
-                const response = await fetch(url, { mode: 'cors' }); // 'cors' might be needed for cross-origin images
+                const response = await fetch(url, { mode: 'cors' }); 
                 if (!response.ok) {
                     throw new Error(`Fehler beim Abrufen der URL: ${response.statusText}`);
                 }
@@ -233,7 +225,6 @@
             } catch (error) {
                 console.error("Fehler beim Herunterladen oder Konvertieren der URL:", error);
                 alertModal(`Fehler beim Laden des Bildes von der URL. Stelle sicher, dass der Link direkt auf ein Bild verweist und öffentlich zugänglich ist.`, null);
-                // WICHTIG: Erneutes Werfen des Fehlers, damit der finally-Block erreicht wird
                 throw error; 
             }
         }
@@ -252,15 +243,8 @@
                 // 1. Initialisiere die Firebase App
                 app = initializeApp(firebaseConfig);
                 
-                // Zusätzliche Prüfung, ob die App initialisiert wurde
                 if (!app) {
                     throw new Error("Firebase App konnte nicht initialisiert werden.");
-                }
-                
-                // 2. Initialisiere die Dienste mit Sicherheitsprüfungen
-                if (typeof getFirestore !== 'function' || typeof getAuth !== 'function') {
-                    // Dieser Fehler tritt auf, wenn die Importe fehlschlagen (häufig bei Caching-Problemen)
-                    throw new Error("Firebase-Dienste (Firestore/Auth) konnten nicht geladen werden. Bitte lösche deinen Browser-Cache und versuche es erneut.");
                 }
                 
                 db = getFirestore(app);
@@ -276,10 +260,7 @@
                 userId = auth.currentUser?.uid || crypto.randomUUID();
                 document.getElementById('status-message').textContent = `Album-ID (für alle Nutzer): ${appId}`;
                 
-                // KERN-FIX: Wir nutzen den vollständigen Pfad (5 Segmente) direkt,
-                // um die Sammlung zu initialisieren, da dies eine ungerade Anzahl von Segmenten hat,
-                // was für eine Sammlung korrekt ist, die in ein übergeordnetes Dokument eingebettet ist.
-                // Dies sollte den Fehler "Document references must have an even number of segments" beheben.
+                // Der korrigierte 5-Segment-Pfad wird zur Initialisierung der Sammlung genutzt.
                 albumCollectionRef = collection(db, FULL_COLLECTION_PATH_STRING);
 
                 startAlbumListener();
@@ -295,7 +276,6 @@
          * Sets up the real-time listener for the public photo collection.
          */
         function startAlbumListener() {
-            // NEU: Nutze die explizit erstellte Collection Reference
             const q = query(albumCollectionRef); 
 
             onSnapshot(q, (snapshot) => {
@@ -317,7 +297,8 @@
                 renderBook(); // Re-render the book pages
             }, (error) => {
                 console.error("Fehler beim Abrufen der Fotos:", error);
-                document.getElementById('page-left').innerHTML = '<p class="text-red-500 p-4">Fehler beim Laden des Albums.</p>';
+                // WICHTIG: Sollte dieser Fehler auftreten, liegt es an der Path-Regel
+                document.getElementById('page-left').innerHTML = `<p class="text-red-500 p-4">Fehler beim Laden des Albums (Path Error: ${error.message}).</p>`;
             });
         }
 
@@ -432,9 +413,6 @@
                      pageLeftEl.classList.remove('page-turn');
                 } else {
                      pageRightEl.classList.remove('page-turn');
-                     // Note: We don't apply page-turn to left page when going back,
-                     // as the effect is designed around the right page flipping left.
-                     // The visual flip is handled purely by the right page's transform-origin.
                 }
 
 
@@ -530,10 +508,9 @@
                     base64Url = await fetchImageAsBase64(url);
                 }
                 
-                console.log("Starte Firestore addDoc für Slot:", slotIndex); // NEUES LOG
+                console.log("Starte Firestore addDoc für Slot:", slotIndex);
                 
                 // 4. Add document to Firestore
-                // NEU: Nutze die explizit erstellte Collection Reference
                 await addDoc(albumCollectionRef, {
                     url: base64Url,
                     caption: caption,
@@ -544,7 +521,7 @@
                     slotIndex: slotIndex // MANDATORY for rendering order
                 });
 
-                console.log("Firestore addDoc erfolgreich."); // NEUES LOG
+                console.log("Firestore addDoc erfolgreich.");
 
                 // Clear input fields
                 if (uploadMode === 'file') {
@@ -556,23 +533,17 @@
                 alertModal(`Foto erfolgreich zu Seite ${pageNumber}, Platz ${slotNumber} hinzugefügt!`, null);
 
             } catch (e) {
-                // VERBESSERTES LOGGING für den allgemeinen Fehlerfall
                 console.error("--- FEHLER BEIM HINZUFÜGEN DES DOKUMENTS (DETAIL) ---"); 
                 console.error("Fehlerobjekt:", e); 
                 console.error("Fehlermeldung:", e.message); 
                 
-                // Überprüfe, ob der Fehler bereits eine spezifische Modalausgabe in den Helfern hatte (z.B. Dateigröße, URL-Fehler).
                 const isSizeError = e.message.includes("File too large") || e.message.includes("URL too large");
                 const isUrlFetchError = e.message.includes("Fehler beim Laden des Bildes von der URL.");
                 
-                // Zeige nur dann eine neue Modal an, wenn es sich nicht um einen bereits behandelten Fehler handelt.
                 if (!isSizeError && !isUrlFetchError) {
-                    // Spezifische Meldung für Validierungsfehler (wenn kein File/URL angegeben)
                     if (e.message.includes("Bitte wähle eine Bilddatei aus") || e.message.includes("Bitte gib eine gültige Bild-URL ein")) {
                          alertModal(e.message, null);
                     } else {
-                        // Generischer Fehler beim Speichern (z.B. Firestore-Fehler/Netzwerk-Timeout/Datenbank-Regelverletzung)
-                        // VERBESSERTE FEHLERMELDUNG: Zeigt jetzt e.message an
                         alertModal(`Fehler beim Speichern des Fotos. Möglicherweise ein Netzwerkproblem, eine Datenbanksperre (zu große Daten) oder eine Regelverletzung. Details: ${e.message || 'Unbekannter Fehler'}`, null);
                     }
                 }
@@ -593,9 +564,8 @@
             
             alertModal(`Möchtest du das Foto auf Seite ${pageNumber}, Platz ${slotNumber} wirklich löschen?`, async () => {
                 try {
-                    // Führt die Löschung aus. Nutzt den vollständigen Pfadstring + DocId.
+                    // Löschung mit dem korrigierten Pfadstring
                     await deleteDoc(doc(db, FULL_COLLECTION_PATH_STRING, docId));
-                    // Firestore Listener aktualisiert die UI automatisch
                     alertModal(`Foto erfolgreich gelöscht.`, null);
                 } catch (error) {
                     console.error("Fehler beim Löschen des Dokuments: ", error);
@@ -604,7 +574,7 @@
             });
         }
         
-        // Macht die Funktion global zugänglich, damit sie von den Buttons im HTML aufgerufen werden kann
+        // Macht die Funktion global zugänglich
         window.deletePhoto = deletePhoto;
 
 
@@ -651,6 +621,7 @@
             }
 
             modal.classList.remove('hidden');
+            modal.style.display = 'flex'; // Sicherstellen, dass es sichtbar ist
         }
 
         // --- Event Listeners and Initial Load ---
@@ -757,7 +728,7 @@
         </div>
     </div>
 
-    <!-- Custom Modal for Alerts/Confirmation (MODIFIED) -->
+    <!-- Custom Modal for Alerts/Confirmation -->
     <div id="custom-modal" class="hidden fixed inset-0 z-50 overflow-y-auto bg-gray-900 bg-opacity-60 flex items-center justify-center">
         <div id="modal-content" class="bg-white rounded-xl shadow-2xl p-6 m-4 max-w-sm w-full transform scale-100 transition-all duration-300">
             <h3 class="text-lg font-bold text-blue-600 mb-3">Album-Benachrichtigung</h3>
