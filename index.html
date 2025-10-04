@@ -12,6 +12,7 @@
             font-family: 'Inter', sans-serif;
             background-color: #f3f4f6;
             display: flex;
+            flex-direction: column;
             justify-content: center;
             align-items: center;
             min-height: 100vh;
@@ -95,21 +96,6 @@
             border-bottom: 2px solid #d4d4d4;
             padding-bottom: 8px;
         }
-        
-        .add-form-container {
-            max-width: 350px;
-            margin: 20px auto;
-            position: sticky;
-            top: 20px;
-            z-index: 50;
-        }
-
-        /* Hide the actual image URL that is stored in the database */
-        .img-url-display {
-            opacity: 0;
-            max-height: 0;
-            overflow: hidden;
-        }
 
     </style>
     <script type="module">
@@ -123,8 +109,10 @@
         let app, db, auth;
         let userId = 'loading';
         let currentPage = 0; // Index of the current visible page set (0 to 19, representing 40 total pages)
-        let uploadMode = 'file'; // Tracks the current input mode: 'file' or 'url'
         
+        // New global state for upload context (used when clicking a slot)
+        let currentUploadContext = { page: null, slot: null, mode: 'file' }; 
+
         // SEITENANZAHL: 40
         const TOTAL_PAGES = 40; 
         const IMAGES_PER_PAGE = 6;
@@ -136,9 +124,7 @@
         const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
         
-        // KERN-FIX: Korrigierter 5-Segment-Pfad für öffentliche Sammlungen
-        // Ein Firestore-Sammlungspfad MUSS eine UNGERADE Anzahl von Segmenten haben (C/D/C/D/C...).
-        // Die Struktur artifacts/{appId}/public/data/album_book_v4 ist die korrekte C/D/C/D/C-Struktur für eine öffentliche Sammlung.
+        // Korrigierter 5-Segment-Pfad für öffentliche Sammlungen
         const FULL_COLLECTION_PATH_STRING = `artifacts/${appId}/public/data/album_book_v4`; 
 
         // Die Firestore Collection Reference, die wir für alle Operationen nutzen
@@ -264,7 +250,7 @@
                 albumCollectionRef = collection(db, FULL_COLLECTION_PATH_STRING);
 
                 startAlbumListener();
-                setUploadMode(uploadMode); // Set initial form visibility
+                // setUploadMode(uploadMode); // Nicht mehr nötig
 
             } catch (error) {
                 console.error("Firebase Initialisierung fehlgeschlagen:", error);
@@ -367,22 +353,25 @@
             for (let i = 0; i < IMAGES_PER_PAGE; i++) {
                 const slotIndex = startIndex + i;
                 const image = albumData[slotIndex];
-                
-                let slotText = `Platz ${i + 1} frei`;
-                if (image && image.page === pageNumber && image.slot === i + 1) {
-                    slotText = `Seite ${pageNumber}, Platz ${i + 1}`;
-                } else if (image) {
+                const slotNum = i + 1; // 1-basierte Slot-Nummer
+
+                let slotText = `Klicken, um Foto hinzuzufügen.`;
+                if (image) {
                     slotText = '';
                 }
 
+                // Fügt den Klick-Handler nur hinzu, wenn der Slot leer ist.
+                const slotClickableClass = !image ? 'cursor-pointer hover:bg-blue-50 transition duration-150' : '';
+                const clickHandler = !image ? `onclick="window.openUploadModal(${pageNumber}, ${slotNum})"` : '';
+
                 content += `
-                    <div class="image-slot group">
+                    <div class="image-slot group ${slotClickableClass}" ${clickHandler}>
                         ${image 
                             ? `<img src="${image.url}" alt="${image.caption || 'Album Foto'}" class="w-full h-full object-cover">
                                <div class="absolute inset-0 bg-black bg-opacity-50 text-white p-2 flex flex-col justify-between opacity-0 group-hover:opacity-100 transition-opacity duration-300">
                                    <div class="flex justify-end">
                                         <!-- Delete Button - Data attributes for JS function call -->
-                                        <button data-doc-id="${image.id}" data-page="${pageNumber}" data-slot="${i + 1}"
+                                        <button data-doc-id="${image.id}" data-page="${pageNumber}" data-slot="${slotNum}"
                                             class="delete-button p-1 rounded-full bg-red-600 hover:bg-red-700 text-white leading-none shadow-lg text-lg font-bold">
                                             &times;
                                         </button>
@@ -392,7 +381,7 @@
                                        <p class="text-xxs text-gray-300">Von: ${image.authorId.substring(0, 8)}...</p>
                                    </div>
                                </div>`
-                            : `<span class="text-gray-500 text-sm">${slotText}</span>`
+                            : `<span class="text-gray-500 text-sm font-semibold p-4 text-center">${slotText}</span>`
                         }
                     </div>
                 `;
@@ -443,89 +432,27 @@
             document.getElementById('prev-page').disabled = currentPage === 0;
             document.getElementById('next-page').disabled = currentPage >= totalPageSets - 1;
         }
-        
-        /**
-         * Toggles the input fields between file upload and URL input.
-         */
-        function setUploadMode(mode) {
-            uploadMode = mode;
-            document.getElementById('file-upload-group').classList.toggle('hidden', mode === 'url');
-            document.getElementById('url-upload-group').classList.toggle('hidden', mode === 'file');
-            
-            // Reset inputs when switching mode
-            document.getElementById('photo-file').value = '';
-            document.getElementById('photo-url').value = '';
-
-            // Update button visual
-            document.getElementById('mode-file').classList.toggle('bg-blue-600', mode === 'file');
-            document.getElementById('mode-file').classList.toggle('text-white', mode === 'file');
-            document.getElementById('mode-file').classList.toggle('bg-gray-200', mode === 'url');
-            document.getElementById('mode-file').classList.toggle('text-gray-800', mode === 'url');
-            
-            document.getElementById('mode-url').classList.toggle('bg-blue-600', mode === 'url');
-            document.getElementById('mode-url').classList.toggle('text-white', mode === 'url');
-            document.getElementById('mode-url').classList.toggle('bg-gray-200', mode === 'file');
-            document.getElementById('mode-url').classList.toggle('text-gray-800', mode === 'file');
-        }
-
 
         /**
-         * Handles the form submission to add a new photo.
+         * Core logic to add a photo document to Firestore.
          */
-        async function handleAddPhoto(event) {
-            event.preventDefault();
-
-            const pageInput = document.getElementById('page-number');
-            const slotInput = document.getElementById('slot-number');
-            const captionInput = document.getElementById('photo-caption');
+        async function processUpload(pageNumber, slotNumber, base64Url, caption) {
+            const slotIndex = (pageNumber - 1) * IMAGES_PER_PAGE + (slotNumber - 1);
             
-            const pageNumber = parseInt(pageInput.value);
-            const slotNumber = parseInt(slotInput.value);
-            const caption = captionInput.value.trim();
-            const addButton = document.getElementById('add-button');
+            // Re-check occupancy just in case
+            if (albumData[slotIndex] !== null) {
+                alertModal(`Dieser Platz (Seite ${pageNumber}, Platz ${slotNumber}) ist bereits belegt!`, null);
+                return;
+            }
             
-            let base64Url = null;
-
             // WICHTIGE PRÜFUNG: Sicherstellen, dass die Datenbankverbindung steht.
             if (!albumCollectionRef) {
                  alertModal("Album-Verbindung wird noch initialisiert. Bitte warten Sie einen Moment.", null);
-                 addButton.disabled = false;
-                 addButton.textContent = 'Foto hinzufügen';
                  return;
             }
-
-            // 1. Validation
-            if (pageNumber < 1 || pageNumber > TOTAL_PAGES || slotNumber < 1 || slotNumber > IMAGES_PER_PAGE) {
-                 alertModal(`Ungültige Seiten- oder Platznummer. Seite muss zwischen 1 und ${TOTAL_PAGES} sein, Platz zwischen 1 und ${IMAGES_PER_PAGE}.`, null);
-                 return;
-            }
-            
-            // 2. Calculate Index and Check Occupancy
-            const slotIndex = (pageNumber - 1) * IMAGES_PER_PAGE + (slotNumber - 1);
-
-            if (albumData[slotIndex] !== null) {
-                alertModal(`Dieser Platz (Seite ${pageNumber}, Platz ${slotNumber}) ist bereits belegt! Wähle bitte einen anderen Platz.`, null);
-                return;
-            }
-
-            addButton.disabled = true;
-            addButton.textContent = 'Lade Bild hoch...';
 
             try {
-                // 3. Get Base64 URL based on Upload Mode
-                if (uploadMode === 'file') {
-                    const file = document.getElementById('photo-file').files[0];
-                    if (!file) { throw new Error("Bitte wähle eine Bilddatei aus deiner Galerie aus."); }
-                    base64Url = await readFileAsBase64(file);
-                } else { // uploadMode === 'url'
-                    const url = document.getElementById('photo-url').value.trim();
-                    if (!url) { throw new Error("Bitte gib eine gültige Bild-URL ein."); }
-                    base64Url = await fetchImageAsBase64(url);
-                }
-                
-                console.log("Starte Firestore addDoc für Slot:", slotIndex);
-                
-                // 4. Add document to Firestore
+                // Add document to Firestore
                 await addDoc(albumCollectionRef, {
                     url: base64Url,
                     caption: caption,
@@ -536,36 +463,160 @@
                     slotIndex: slotIndex // MANDATORY for rendering order
                 });
 
-                console.log("Firestore addDoc erfolgreich.");
-
-                // Clear input fields
-                if (uploadMode === 'file') {
-                    document.getElementById('photo-file').value = '';
-                } else {
-                    document.getElementById('photo-url').value = '';
-                }
-                captionInput.value = '';
                 alertModal(`Foto erfolgreich zu Seite ${pageNumber}, Platz ${slotNumber} hinzugefügt!`, null);
 
             } catch (e) {
-                console.error("--- FEHLER BEIM HINZUFÜGEN DES DOKUMENTS (DETAIL) ---"); 
-                console.error("Fehlerobjekt:", e); 
-                console.error("Fehlermeldung:", e.message); 
-                
-                const isSizeError = e.message.includes("File too large") || e.message.includes("URL too large");
-                const isUrlFetchError = e.message.includes("Fehler beim Laden des Bildes von der URL.");
-                
-                if (!isSizeError && !isUrlFetchError) {
-                    if (e.message.includes("Bitte wähle eine Bilddatei aus") || e.message.includes("Bitte gib eine gültige Bild-URL ein")) {
-                         alertModal(e.message, null);
-                    } else {
-                        alertModal(`Fehler beim Speichern des Fotos. Möglicherweise ein Netzwerkproblem, eine Datenbanksperre (zu große Daten) oder eine Regelverletzung. Details: ${e.message || 'Unbekannter Fehler'}`, null);
-                    }
+                console.error("Fehler beim Speichern des Dokuments:", e); 
+                alertModal(`Fehler beim Speichern des Fotos. Details: ${e.message || 'Unbekannter Fehler'}`, null);
+            }
+        }
+        
+        /**
+         * New modal logic for handling upload input after clicking a slot.
+         */
+        function openUploadModal(pageNumber, slotNumber) {
+            currentUploadContext.page = pageNumber;
+            currentUploadContext.slot = slotNumber;
+            currentUploadContext.mode = 'file'; // Default to file upload
+            
+            const modal = document.getElementById('custom-modal');
+            const modalContent = document.getElementById('modal-content');
+            
+            // Dynamische Generierung des Formularinhalts
+            modalContent.innerHTML = `
+                <h3 class="text-lg font-bold text-blue-600 mb-3">Foto zu Seite ${pageNumber}, Platz ${slotNumber} hinzufügen</h3>
+                <p class="text-xs text-yellow-600 mb-4 bg-yellow-50 p-2 rounded-lg border border-yellow-200">
+                    **Wichtig:** Bilder sind auf **max. 500 KB** beschränkt!
+                </p>
+                <form id="slot-upload-form" class="space-y-4">
+                    
+                    <!-- Mode Selector -->
+                    <div class="flex space-x-1 p-1 bg-gray-100 rounded-lg">
+                        <button type="button" id="modal-mode-file" class="flex-1 py-2 rounded-lg text-sm font-semibold transition duration-150 bg-blue-600 text-white" 
+                            onclick="window.setModalUploadMode('file')">
+                            Upload von Gerät
+                        </button>
+                        <button type="button" id="modal-mode-url" class="flex-1 py-2 rounded-lg text-sm font-semibold transition duration-150 bg-gray-200 text-gray-800" 
+                            onclick="window.setModalUploadMode('url')">
+                            Per Bild-URL
+                        </button>
+                    </div>
+                    
+                    <!-- Input Fields (Conditional Display) -->
+                    <div id="modal-file-upload-group">
+                        <label for="modal-photo-file" class="block text-sm font-medium text-gray-700">Bild hochladen</label>
+                        <input type="file" id="modal-photo-file" accept="image/*" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                    </div>
+
+                    <div id="modal-url-upload-group" class="hidden">
+                        <label for="modal-photo-url" class="block text-sm font-medium text-gray-700">Öffentliche Bild-URL</label>
+                        <input type="url" id="modal-photo-url" placeholder="https://example.com/bild.jpg" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                    </div>
+                    
+                    <!-- Caption -->
+                    <div>
+                        <label for="modal-photo-caption" class="block text-sm font-medium text-gray-700">Beschreibung (optional)</label>
+                        <input type="text" id="modal-photo-caption" maxlength="50" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" placeholder="Max. 50 Zeichen">
+                    </div>
+
+                    <div class="mt-4 flex justify-end space-x-3">
+                         <button type="button" id="modal-cancel-button" class="px-4 py-2 bg-gray-300 text-gray-800 text-sm font-medium rounded-lg hover:bg-gray-400 focus:outline-none">
+                            Abbrechen
+                        </button>
+                        <button type="submit" id="modal-add-button" class="px-4 py-2 text-white text-sm font-medium rounded-lg bg-green-600 hover:bg-green-700 focus:outline-none transition duration-150">
+                            Hinzufügen
+                        </button>
+                    </div>
+                </form>
+            `;
+            
+            // Initialen Zustand setzen
+            setModalUploadMode(currentUploadContext.mode);
+
+            // Event Listeners für das dynamische Formular
+            document.getElementById('modal-cancel-button').onclick = () => modal.classList.add('hidden');
+            document.getElementById('slot-upload-form').addEventListener('submit', handleModalUploadSubmit);
+
+            modal.classList.remove('hidden');
+            modal.style.display = 'flex';
+        }
+
+        /**
+         * Toggles the input fields within the upload modal.
+         */
+        function setModalUploadMode(mode) {
+            currentUploadContext.mode = mode;
+            const fileGroup = document.getElementById('modal-file-upload-group');
+            const urlGroup = document.getElementById('modal-url-upload-group');
+            const fileButton = document.getElementById('modal-mode-file');
+            const urlButton = document.getElementById('modal-mode-url');
+
+            // Elemente prüfen, bevor sie verwendet werden (für den Fall, dass die Funktion zu früh aufgerufen wird)
+            if (!fileGroup || !urlGroup || !fileButton || !urlButton) return;
+
+            fileGroup.classList.toggle('hidden', mode === 'url');
+            urlGroup.classList.toggle('hidden', mode === 'file');
+            
+            // Update button visual
+            fileButton.classList.toggle('bg-blue-600', mode === 'file');
+            fileButton.classList.toggle('text-white', mode === 'file');
+            fileButton.classList.toggle('bg-gray-200', mode === 'url');
+            fileButton.classList.toggle('text-gray-800', mode === 'url');
+            
+            urlButton.classList.toggle('bg-blue-600', mode === 'url');
+            urlButton.classList.toggle('text-white', mode === 'url');
+            urlButton.classList.toggle('bg-gray-200', mode === 'file');
+            urlButton.classList.toggle('text-gray-800', mode === 'file');
+        }
+        
+        /**
+         * Handles the submission of the upload form within the modal.
+         */
+        async function handleModalUploadSubmit(event) {
+            event.preventDefault();
+            const modal = document.getElementById('custom-modal');
+            const addButton = document.getElementById('modal-add-button');
+            
+            const pageNumber = currentUploadContext.page;
+            const slotNumber = currentUploadContext.slot;
+            const mode = currentUploadContext.mode;
+            
+            const caption = document.getElementById('modal-photo-caption').value.trim();
+            let base64Url = null;
+
+            addButton.disabled = true;
+            addButton.textContent = 'Lade Bild hoch...';
+            
+            try {
+                // 1. Get Base64 URL based on Upload Mode
+                if (mode === 'file') {
+                    const fileInput = document.getElementById('modal-photo-file');
+                    const file = fileInput ? fileInput.files[0] : null;
+
+                    if (!file) { throw new Error("Bitte wähle eine Bilddatei aus deiner Galerie aus."); }
+                    base64Url = await readFileAsBase64(file);
+                } else { // mode === 'url'
+                    const urlInput = document.getElementById('modal-photo-url');
+                    const url = urlInput ? urlInput.value.trim() : '';
+
+                    if (!url) { throw new Error("Bitte gib eine gültige Bild-URL ein."); }
+                    base64Url = await fetchImageAsBase64(url);
                 }
+                
+                // 2. Process and Save
+                await processUpload(pageNumber, slotNumber, base64Url, caption);
+                
+                // 3. Close Modal on success (processUpload displays final alert)
+                modal.classList.add('hidden');
+
+            } catch (e) {
+                 // Error handling is complex, use the generic alertModal
+                 const errorMsg = e.message.includes("File too large") || e.message.includes("URL too large") ? "Das Bild ist zu groß (max. 500 KB)." : e.message;
+                 alertModal(`Fehler beim Hochladen: ${errorMsg}`, null);
             } finally {
-                // Stelle sicher, dass der Button immer wieder aktiviert wird
+                // Restore button state
                 addButton.disabled = false;
-                addButton.textContent = 'Foto hinzufügen';
+                addButton.textContent = 'Hinzufügen';
             }
         }
 
@@ -594,65 +645,58 @@
             });
         }
         
-        // Macht die Funktion global zugänglich
+        // Macht die Funktion global zugänglich für Klicks aus dem HTML
         window.deletePhoto = deletePhoto;
+        window.openUploadModal = openUploadModal;
+        window.setModalUploadMode = setModalUploadMode; // Für den Klick im dynamischen Modal
 
 
         /**
          * Custom modal replacement for alert() and confirmation.
-         * @param {string} message - Message to display.
-         * @param {function | null} onConfirm - Function to run on confirm (for deletion). If null, acts as simple alert.
+         * IMPORTANT: This is for simple alerts/confirms only, NOT for complex input forms.
          */
         function alertModal(message, onConfirm = null) {
+            // Revert content to standard alert/confirm layout
             const modal = document.getElementById('custom-modal');
-            const modalMessage = document.getElementById('modal-message');
-            const confirmButton = document.getElementById('confirm-modal');
-            const cancelButton = document.getElementById('cancel-modal');
-            
-            modalMessage.textContent = message;
-            
-            // Setup buttons based on confirmation need
-            if (onConfirm) {
-                // Confirmation Mode (e.g., for Deletion)
-                cancelButton.classList.remove('hidden');
-                confirmButton.textContent = 'Löschen';
-                confirmButton.classList.remove('bg-blue-500');
-                confirmButton.classList.add('bg-red-600');
-                
-                // Attach event listeners for confirmation
-                confirmButton.onclick = () => {
-                    modal.classList.add('hidden');
-                    onConfirm(); // Execute deletion callback
-                };
-                cancelButton.onclick = () => {
-                    modal.classList.add('hidden');
-                };
-            } else {
-                // Simple Alert Mode (just OK)
-                cancelButton.classList.add('hidden');
-                confirmButton.textContent = 'OK';
-                confirmButton.classList.add('bg-blue-500');
-                confirmButton.classList.remove('bg-red-600');
-                
-                // Attach event listeners for simple OK
-                confirmButton.onclick = () => {
-                    modal.classList.add('hidden');
-                };
-            }
-
             modal.classList.remove('hidden');
-            modal.style.display = 'flex'; // Sicherstellen, dass es sichtbar ist
+            modal.style.display = 'flex';
+            
+            const modalContent = document.getElementById('modal-content');
+            
+            // Dynamischer Inhalt für einfache Benachrichtigung/Bestätigung
+            modalContent.innerHTML = `
+                <h3 class="text-lg font-bold text-blue-600 mb-3">Album-Benachrichtigung</h3>
+                <p id="modal-message-simple" class="text-gray-700">${message}</p>
+                <div class="mt-4 flex justify-end space-x-3">
+                    <button id="cancel-modal-simple" type="button" class="px-4 py-2 bg-gray-300 text-gray-800 text-sm font-medium rounded-lg hover:bg-gray-400 focus:outline-none ${onConfirm ? '' : 'hidden'}">
+                        Abbrechen
+                    </button>
+                    <button id="confirm-modal-simple" type="button" class="px-4 py-2 text-white text-sm font-medium rounded-lg focus:outline-none transition duration-150 ${onConfirm ? 'bg-red-600' : 'bg-blue-500'}">
+                        ${onConfirm ? 'Löschen' : 'OK'}
+                    </button>
+                </div>
+            `;
+            
+            const confirmButton = document.getElementById('confirm-modal-simple');
+            const cancelButton = document.getElementById('cancel-modal-simple');
+
+            confirmButton.onclick = () => {
+                modal.classList.add('hidden');
+                if (onConfirm) onConfirm();
+            };
+            
+            if (onConfirm) {
+                 cancelButton.onclick = () => modal.classList.add('hidden');
+            }
         }
 
         // --- Event Listeners and Initial Load ---
         window.onload = () => {
             initializeAppAndAuth();
             
-            document.getElementById('add-photo-form').addEventListener('submit', handleAddPhoto);
+            // Navigation Event Listeners
             document.getElementById('prev-page').addEventListener('click', () => navigatePage(-1));
             document.getElementById('next-page').addEventListener('click', () => navigatePage(1));
-            document.getElementById('mode-file').addEventListener('click', () => setUploadMode('file'));
-            document.getElementById('mode-url').addEventListener('click', () => setUploadMode('url'));
             
             // Initial rendering and button state update
             renderBook();
@@ -694,73 +738,13 @@
             </button>
         </div>
         
-        <!-- Form to Add Photos (Mobile-friendly, centered below the book) -->
-        <div class="add-form-container p-6 bg-white rounded-xl shadow-xl border-t-4 border-blue-500">
-            <h2 class="text-xl font-bold text-gray-800 mb-4">Foto hinzufügen</h2>
-            <p class="text-xs text-yellow-600 mb-4 bg-yellow-50 p-2 rounded-lg border border-yellow-200">
-                **Wichtig:** Bilder (egal ob Upload oder Link) sind auf **max. 500 KB** beschränkt!
-            </p>
-            <form id="add-photo-form" class="space-y-4">
-                
-                <!-- Page and Slot Selectors -->
-                <div class="flex space-x-3">
-                    <div class="flex-1">
-                        <label for="page-number" class="block text-sm font-medium text-gray-700">Seite (1 - 40)</label>
-                        <input type="number" id="page-number" min="1" max="40" value="1" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-center">
-                    </div>
-                    <div class="flex-1">
-                        <label for="slot-number" class="block text-sm font-medium text-gray-700">Platz (1 - 6)</label>
-                        <input type="number" id="slot-number" min="1" max="6" value="1" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-center">
-                    </div>
-                </div>
-
-                <!-- Mode Selector (File vs. URL) -->
-                <div class="flex space-x-1 p-1 bg-gray-100 rounded-lg">
-                    <button type="button" id="mode-file" class="flex-1 py-2 rounded-lg text-sm font-semibold transition duration-150 bg-blue-600 text-white" onclick="setUploadMode('file')">
-                        Upload von Gerät
-                    </button>
-                    <button type="button" id="mode-url" class="flex-1 py-2 rounded-lg text-sm font-semibold transition duration-150 bg-gray-200 text-gray-800" onclick="setUploadMode('url')">
-                        Per Bild-URL
-                    </button>
-                </div>
-                
-                <!-- Input Fields (Conditional Display) -->
-                <div id="file-upload-group">
-                    <label for="photo-file" class="block text-sm font-medium text-gray-700">Bild hochladen (max. 500 KB)</label>
-                    <input type="file" id="photo-file" accept="image/*" class="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
-                </div>
-
-                <div id="url-upload-group" class="hidden">
-                    <label for="photo-url" class="block text-sm font-medium text-gray-700">Öffentliche Bild-URL</label>
-                    <input type="url" id="photo-url" placeholder="https://example.com/bild.jpg" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
-                </div>
-
-                <!-- Caption -->
-                <div>
-                    <label for="photo-caption" class="block text-sm font-medium text-gray-700">Beschreibung</label>
-                    <input type="text" id="photo-caption" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
-                </div>
-
-                <button type="submit" id="add-button" class="w-full py-2 px-4 rounded-lg shadow-md text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none transition duration-150">
-                    Foto hinzufügen
-                </button>
-            </form>
-        </div>
+        <!-- Das Formular wurde entfernt. Die Hinzufüge-Funktion erfolgt nun durch Klicken auf die leeren Slots im Album. -->
     </div>
 
-    <!-- Custom Modal for Alerts/Confirmation -->
+    <!-- Custom Modal for Alerts/Confirmation/Upload (Inhalt wird dynamisch in JS eingefügt) -->
     <div id="custom-modal" class="hidden fixed inset-0 z-50 overflow-y-auto bg-gray-900 bg-opacity-60 flex items-center justify-center">
         <div id="modal-content" class="bg-white rounded-xl shadow-2xl p-6 m-4 max-w-sm w-full transform scale-100 transition-all duration-300">
-            <h3 class="text-lg font-bold text-blue-600 mb-3">Album-Benachrichtigung</h3>
-            <p id="modal-message" class="text-gray-700"></p>
-            <div class="mt-4 flex justify-end space-x-3">
-                <button id="cancel-modal" type="button" class="hidden px-4 py-2 bg-gray-300 text-gray-800 text-sm font-medium rounded-lg hover:bg-gray-400 focus:outline-none">
-                    Abbrechen
-                </button>
-                <button id="confirm-modal" type="button" class="px-4 py-2 text-white text-sm font-medium rounded-lg focus:outline-none transition duration-150">
-                    OK
-                </button>
-            </div>
+            <!-- Content is injected dynamically by JS (alertModal or openUploadModal) -->
         </div>
     </div>
 
