@@ -78,7 +78,7 @@
         .image-slot img {
             width: 100%;
             height: 100%;
-            object-fit: fill; /* GEÄNDERT: Sorgt dafür, dass das Bild gestreckt/gestaucht wird, um den Rahmen komplett auszufüllen */
+            object-fit: fill; /* Sorgt dafür, dass das Bild gestreckt/gestaucht wird, um den Rahmen komplett auszufüllen */
             transition: opacity 0.3s;
         }
 
@@ -204,7 +204,7 @@
                 // 4. Perform size check on the resulting Base64 string
                 if (base64ToByteSize(base64Url) > MAX_SIZE) {
                     alertModal(`Das Bild von der URL ist zu groß. Maximal 500KB erlaubt.`, null);
-                    throw new Error("File from URL too large.");
+                    throw new Error("URL too large.");
                 }
 
                 return base64Url;
@@ -212,7 +212,7 @@
             } catch (error) {
                 console.error("Fehler beim Herunterladen oder Konvertieren der URL:", error);
                 alertModal(`Fehler beim Laden des Bildes von der URL. Stelle sicher, dass der Link direkt auf ein Bild verweist und öffentlich zugänglich ist.`, null);
-                throw error;
+                throw new Error("Fehler beim Laden des Bildes von der URL.");
             }
         }
 
@@ -394,21 +394,26 @@
             const totalPageSets = TOTAL_PAGES / 2; // 40 / 2 = 20 total sets
             
             if (newPage >= 0 && newPage < totalPageSets) {
-                // Apply the turn effect to the current right page before changing content
                 const pageRightEl = document.getElementById('page-right');
+                const pageLeftEl = document.getElementById('page-left');
                 
-                // Add class for visual flip effect
+                // Apply the turn effect (for forward and backward)
                 if (direction > 0) {
                      pageRightEl.classList.add('page-turn');
+                     pageLeftEl.classList.remove('page-turn');
                 } else {
-                     // For previous page, use a simpler transition or reverse logic if needed
+                     pageRightEl.classList.remove('page-turn');
+                     // Note: We don't apply page-turn to left page when going back,
+                     // as the effect is designed around the right page flipping left.
+                     // The visual flip is handled purely by the right page's transform-origin.
                 }
+
 
                 // Wait for the animation to finish before updating state and content
                 setTimeout(() => {
                     currentPage = newPage;
                     renderBook();
-                    // Remove class immediately after rendering new content
+                    // Remove class to reset for the next flip
                     pageRightEl.classList.remove('page-turn'); 
                     updateNavigationButtons();
                 }, 800); 
@@ -518,11 +523,23 @@
 
             } catch (e) {
                 console.error("Fehler beim Hinzufügen des Dokuments: ", e);
-                // Errors thrown by helper functions already have custom alerts
-                if (!e.message.includes("File too large") && !e.message.includes("URL too large")) {
-                    alertModal(`Fehler beim Speichern: ${e.message}`, null);
+                
+                // Überprüfe, ob der Fehler bereits eine spezifische Modalausgabe in den Helfern hatte (z.B. Dateigröße, URL-Fehler).
+                const isSizeError = e.message.includes("File too large") || e.message.includes("URL too large");
+                const isUrlFetchError = e.message.includes("Fehler beim Laden des Bildes von der URL.");
+                
+                // Zeige nur dann eine neue Modal an, wenn es sich nicht um einen bereits behandelten Fehler handelt.
+                if (!isSizeError && !isUrlFetchError) {
+                    // Spezifische Meldung für Validierungsfehler (wenn kein File/URL angegeben)
+                    if (e.message.includes("Bitte wähle eine Bilddatei aus") || e.message.includes("Bitte gib eine gültige Bild-URL ein")) {
+                         alertModal(e.message, null);
+                    } else {
+                        // Generischer Fehler beim Speichern (z.B. Firestore-Fehler)
+                        alertModal(`Fehler beim Speichern des Fotos. Bitte überprüfe deine Internetverbindung und versuche es erneut. (Fehlercode: ${e.name || 'Error'})`, null);
+                    }
                 }
             } finally {
+                // Stelle sicher, dass der Button immer wieder aktiviert wird
                 addButton.disabled = false;
                 addButton.textContent = 'Foto hinzufügen';
             }
