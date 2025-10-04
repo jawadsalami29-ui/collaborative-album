@@ -115,6 +115,7 @@
     <script type="module">
         // --- Firebase & App Configuration ---
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        // Sicherstellen, dass getAuth, signInWithCustomToken, signInAnonymously korrekt importiert werden
         import { getAuth, signInWithCustomToken, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         // WICHTIG: deleteDoc und doc für die Löschfunktion importiert
         import { getFirestore, collection, query, onSnapshot, addDoc, serverTimestamp, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
@@ -226,7 +227,20 @@
             }
 
             try {
+                // 1. Initialisiere die Firebase App
                 app = initializeApp(firebaseConfig);
+                
+                // Zusätzliche Prüfung, ob die App initialisiert wurde
+                if (!app) {
+                    throw new Error("Firebase App konnte nicht initialisiert werden.");
+                }
+                
+                // 2. Initialisiere die Dienste mit Sicherheitsprüfungen
+                if (typeof getFirestore !== 'function' || typeof getAuth !== 'function') {
+                    // Dieser Fehler tritt auf, wenn die Importe fehlschlagen (häufig bei Caching-Problemen)
+                    throw new Error("Firebase-Dienste (Firestore/Auth) konnten nicht geladen werden. Bitte lösche deinen Browser-Cache und versuche es erneut.");
+                }
+                
                 db = getFirestore(app);
                 auth = getAuth(app);
                 setLogLevel('Debug');
