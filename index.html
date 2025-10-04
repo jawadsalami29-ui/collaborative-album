@@ -276,6 +276,13 @@
          * Sets up the real-time listener for the public photo collection.
          */
         function startAlbumListener() {
+            // Prüfung, falls die Initialisierung fehlschlägt, aber der Listener trotzdem aufgerufen wird
+            if (!albumCollectionRef) {
+                console.error("Album Collection Reference ist undefiniert. Kann keinen Listener starten.");
+                document.getElementById('page-left').innerHTML = `<p class="text-red-500 p-4">Fehler: Datenbank nicht verbunden.</p>`;
+                return;
+            }
+
             const q = query(albumCollectionRef); 
 
             onSnapshot(q, (snapshot) => {
@@ -479,6 +486,14 @@
             
             let base64Url = null;
 
+            // WICHTIGE PRÜFUNG: Sicherstellen, dass die Datenbankverbindung steht.
+            if (!albumCollectionRef) {
+                 alertModal("Album-Verbindung wird noch initialisiert. Bitte warten Sie einen Moment.", null);
+                 addButton.disabled = false;
+                 addButton.textContent = 'Foto hinzufügen';
+                 return;
+            }
+
             // 1. Validation
             if (pageNumber < 1 || pageNumber > TOTAL_PAGES || slotNumber < 1 || slotNumber > IMAGES_PER_PAGE) {
                  alertModal(`Ungültige Seiten- oder Platznummer. Seite muss zwischen 1 und ${TOTAL_PAGES} sein, Platz zwischen 1 und ${IMAGES_PER_PAGE}.`, null);
@@ -563,6 +578,11 @@
         function deletePhoto(docId, pageNumber, slotNumber) {
             
             alertModal(`Möchtest du das Foto auf Seite ${pageNumber}, Platz ${slotNumber} wirklich löschen?`, async () => {
+                // WICHTIGE PRÜFUNG: Sicherstellen, dass die Datenbankverbindung steht.
+                if (!db) {
+                    alertModal("Datenbankverbindung wird hergestellt. Bitte warten.", null);
+                    return;
+                }
                 try {
                     // Löschung mit dem korrigierten Pfadstring
                     await deleteDoc(doc(db, FULL_COLLECTION_PATH_STRING, docId));
