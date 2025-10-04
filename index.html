@@ -158,8 +158,13 @@
                 const reader = new FileReader();
                 reader.onload = () => {
                     const base64Url = reader.result;
+                    const base64ByteSize = base64ToByteSize(base64Url);
+
+                    // NEUES LOGGING: Protokolliert die berechnete Base64-Größe
+                    console.log(`[Upload-Check] Base64-Größe nach Konvertierung: ${(base64ByteSize / 1024).toFixed(2)} KB.`);
+                    
                     // Check Base64 string size after conversion
-                    if (base64ToByteSize(base64Url) > MAX_SIZE) { 
+                    if (base64ByteSize > MAX_SIZE) { 
                         alertModal(`Die Datei ist zu groß (${(file.size / 1024 / 1024).toFixed(2)}MB). Maximal 500KB erlaubt.`, null);
                         reject(new Error("File too large."));
                         return;
@@ -174,6 +179,10 @@
                     reject(new Error("File too large."));
                     return;
                 }
+                
+                // NEUES LOGGING: Protokolliert die Rohgröße vor der Konvertierung
+                console.log(`[Upload-Check] Rohgröße der Datei: ${(file.size / 1024).toFixed(2)} KB.`);
+
 
                 reader.readAsDataURL(file);
             });
@@ -202,7 +211,10 @@
                 });
 
                 // 4. Perform size check on the resulting Base64 string
-                if (base64ToByteSize(base64Url) > MAX_SIZE) {
+                const base64ByteSize = base64ToByteSize(base64Url);
+                console.log(`[URL-Check] Base64-Größe nach Konvertierung: ${(base64ByteSize / 1024).toFixed(2)} KB.`);
+                
+                if (base64ByteSize > MAX_SIZE) {
                     alertModal(`Das Bild von der URL ist zu groß. Maximal 500KB erlaubt.`, null);
                     throw new Error("URL too large.");
                 }
@@ -212,7 +224,8 @@
             } catch (error) {
                 console.error("Fehler beim Herunterladen oder Konvertieren der URL:", error);
                 alertModal(`Fehler beim Laden des Bildes von der URL. Stelle sicher, dass der Link direkt auf ein Bild verweist und öffentlich zugänglich ist.`, null);
-                throw new Error("Fehler beim Laden des Bildes von der URL.");
+                // WICHTIG: Erneutes Werfen des Fehlers, damit der finally-Block erreicht wird
+                throw error; 
             }
         }
 
@@ -526,7 +539,10 @@
                 alertModal(`Foto erfolgreich zu Seite ${pageNumber}, Platz ${slotNumber} hinzugefügt!`, null);
 
             } catch (e) {
-                console.error("Fehler beim Hinzufügen des Dokuments (Detail): ", e); // VERBESSERTES LOGGING
+                // VERBESSERTES LOGGING für den allgemeinen Fehlerfall
+                console.error("--- FEHLER BEIM HINZUFÜGEN DES DOKUMENTS (DETAIL) ---"); 
+                console.error("Fehlerobjekt:", e); 
+                console.error("Fehlermeldung:", e.message); 
                 
                 // Überprüfe, ob der Fehler bereits eine spezifische Modalausgabe in den Helfern hatte (z.B. Dateigröße, URL-Fehler).
                 const isSizeError = e.message.includes("File too large") || e.message.includes("URL too large");
@@ -538,9 +554,9 @@
                     if (e.message.includes("Bitte wähle eine Bilddatei aus") || e.message.includes("Bitte gib eine gültige Bild-URL ein")) {
                          alertModal(e.message, null);
                     } else {
-                        // Generischer Fehler beim Speichern (z.B. Firestore-Fehler/Netzwerk-Timeout)
+                        // Generischer Fehler beim Speichern (z.B. Firestore-Fehler/Netzwerk-Timeout/Datenbank-Regelverletzung)
                         // VERBESSERTE FEHLERMELDUNG: Zeigt jetzt e.message an
-                        alertModal(`Fehler beim Speichern des Fotos. Möglicherweise ein Netzwerkproblem oder zu große Daten. Details: ${e.message || 'Unbekannter Fehler'}`, null);
+                        alertModal(`Fehler beim Speichern des Fotos. Möglicherweise ein Netzwerkproblem, eine Datenbanksperre (zu große Daten) oder eine Regelverletzung. Details: ${e.message || 'Unbekannter Fehler'}`, null);
                     }
                 }
             } finally {
