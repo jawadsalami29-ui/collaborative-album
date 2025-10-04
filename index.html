@@ -22,13 +22,13 @@
         .album-container {
             width: 100%;
             max-width: 1000px;
-            perspective: 1500px; /* Perspective for 3D flip effect */
+            perspective: 1500px; 
         }
 
         .book {
             position: relative;
             width: 100%;
-            height: 600px; /* Fixed height for album look */
+            height: 600px; 
             transform-style: preserve-3d;
             transform: rotateY(0deg);
             transition: transform 1.5s;
@@ -41,12 +41,12 @@
             width: 50%;
             height: 100%;
             padding: 30px;
-            background-color: #fdfaf0; /* Off-white page color */
+            background-color: #fdfaf0; 
             border: 1px solid #d4d4d4;
             box-sizing: border-box;
             transform-origin: left;
             transition: transform 0.8s, z-index 0s 0.8s;
-            border-right: 2px solid #a8a8a8; /* Inner spine shadow */
+            border-right: 2px solid #a8a8a8; 
         }
 
         .left-page {
@@ -79,11 +79,10 @@
         .image-slot img {
             width: 100%;
             height: 100%;
-            object-fit: fill; /* Sorgt dafür, dass das Bild gestreckt/gestaucht wird, um den Rahmen komplett auszufüllen */
+            object-fit: fill; 
             transition: opacity 0.3s;
         }
 
-        /* Styles for the "page turn" effect - essential for the look */
         .page-turn {
             transform: rotateY(-180deg);
             z-index: 1000;
@@ -97,7 +96,6 @@
             padding-bottom: 8px;
         }
         
-        /* Smaller font for user ID display */
         .text-xxs {
             font-size: 0.65rem;
             line-height: 1;
@@ -111,44 +109,46 @@
         import { getFirestore, collection, query, onSnapshot, addDoc, serverTimestamp, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Global state and constants
+        // Globale Zustände und Konstanten
         let app, db, auth;
         let userId = 'loading';
-        let currentPage = 0; // Index of the current visible page set (0 to 19, representing 40 total pages)
-        
-        // New global state for upload context (used when clicking a slot)
+        let currentPage = 0; // Index des aktuellen sichtbaren Seitensatzes (0 bis 19)
         let currentUploadContext = { page: null, slot: null, mode: 'file' }; 
 
-        // SEITENANZAHL: 40
         const TOTAL_PAGES = 40; 
         const IMAGES_PER_PAGE = 6;
         const MAX_SIZE = 500 * 1024; // 500KB Limit
         const totalSlots = TOTAL_PAGES * IMAGES_PER_PAGE; 
-        const albumData = new Array(totalSlots).fill(null); // Array to hold all images
+        const albumData = new Array(totalSlots).fill(null); // Array zur Speicherung aller Bilder
 
+        // Defensives Laden der globalen Variablen
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-album-id';
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+        // Fehlerbehandlung beim Parsen ist wichtig, um den weißen Bildschirm zu vermeiden
+        let firebaseConfig = null;
+        try {
+            if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+                firebaseConfig = JSON.parse(__firebase_config);
+            }
+        } catch (e) {
+            console.error("Fehler beim Parsen der Firebase-Konfiguration:", e);
+        }
+        
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
         
-        // Korrigierter 5-Segment-Pfad für öffentliche Sammlungen
         const FULL_COLLECTION_PATH_STRING = `artifacts/${appId}/public/data/album_book_v4`; 
-
-        // Die Firestore Collection Reference, die wir für alle Operationen nutzen
         let albumCollectionRef; 
 
 
         /**
-         * Converts a Base64 string to its approximate original size in bytes.
+         * Konvertiert einen Base64-String in seine ungefähre Originalgröße in Bytes.
          */
         function base64ToByteSize(base64) {
-            // Remove the data URI part ("data:image/jpeg;base64,")
             const base64Content = base64.split(',')[1];
-            // Calculate actual byte size of the base64 content
             return base64Content.length * 0.75; 
         }
 
         /**
-         * Helper function to read file as Base64 (needed for local uploads)
+         * Hilfsfunktion zum Lesen der Datei als Base64 (lokaler Upload).
          */
         function readFileAsBase64(file) {
             return new Promise((resolve, reject) => {
@@ -157,45 +157,30 @@
                     const base64Url = reader.result;
                     const base64ByteSize = base64ToByteSize(base64Url);
                     
-                    console.log(`[Upload-Check] Base64-Größe nach Konvertierung: ${(base64ByteSize / 1024).toFixed(2)} KB.`);
-                    
                     if (base64ByteSize > MAX_SIZE) { 
-                        alertModal(`Die Datei ist zu groß (${(file.size / 1024 / 1024).toFixed(2)}MB). Maximal 500KB erlaubt.`, null);
+                        alertModal(`Die Datei ist zu groß (${(base64ByteSize / 1024).toFixed(2)}KB). Maximal 500KB erlaubt.`, null);
                         reject(new Error("File too large."));
                         return;
                     }
                     resolve(base64Url);
                 };
                 reader.onerror = error => reject(error);
-                
-                if (file.size > MAX_SIZE * 1.5) { 
-                    alertModal(`Die Datei ist zu groß (Rohgröße ${(file.size / 1024 / 1024).toFixed(2)}MB). Maximal 500KB erlaubt.`, null);
-                    reject(new Error("File too large."));
-                    return;
-                }
-                
-                console.log(`[Upload-Check] Rohgröße der Datei: ${(file.size / 1024).toFixed(2)} KB.`);
-
-
                 reader.readAsDataURL(file);
             });
         }
         
         /**
-         * Fetches an image from a URL and converts it to Base64, with size check.
+         * Lädt ein Bild von einer URL und konvertiert es in Base64 (mit Größenprüfung).
          */
         async function fetchImageAsBase64(url) {
             try {
-                // 1. Fetch the image
                 const response = await fetch(url, { mode: 'cors' }); 
                 if (!response.ok) {
                     throw new Error(`Fehler beim Abrufen der URL: ${response.statusText}`);
                 }
                 
-                // 2. Convert response to Blob
                 const blob = await response.blob();
                 
-                // 3. Convert Blob to Base64
                 const base64Url = await new Promise((resolve, reject) => {
                     const reader = new FileReader();
                     reader.onload = () => resolve(reader.result);
@@ -203,9 +188,7 @@
                     reader.readAsDataURL(blob);
                 });
 
-                // 4. Perform size check on the resulting Base64 string
                 const base64ByteSize = base64ToByteSize(base64Url);
-                console.log(`[URL-Check] Base64-Größe nach Konvertierung: ${(base64ByteSize / 1024).toFixed(2)} KB.`);
                 
                 if (base64ByteSize > MAX_SIZE) {
                     alertModal(`Das Bild von der URL ist zu groß. Maximal 500KB erlaubt.`, null);
@@ -222,22 +205,22 @@
         }
 
         /**
-         * Initializes Firebase and authenticates the user.
+         * Initialisiert Firebase und authentifiziert den Benutzer.
          */
         async function initializeAppAndAuth() {
             if (!firebaseConfig) {
-                console.error("Firebase Config nicht gefunden.");
-                document.getElementById('status-message').textContent = "Fehler: Firebase Konfiguration fehlt.";
+                const errorMsg = "Fehler: Firebase Konfiguration fehlt. Das Album kann nicht geladen werden.";
+                console.error(errorMsg);
+                document.getElementById('status-message').textContent = errorMsg;
+                // Zeige die Fehlermeldung auf der UI an, um den weißen Bildschirm zu vermeiden
+                document.getElementById('page-left').innerHTML = `<h2 class="text-2xl font-semibold page-header">Initialisierungsfehler</h2><p class="text-red-500 p-4">${errorMsg}</p>`;
+                document.getElementById('page-right').classList.add('hidden');
                 return;
             }
 
             try {
                 // 1. Initialisiere die Firebase App
                 app = initializeApp(firebaseConfig);
-                
-                if (!app) {
-                    throw new Error("Firebase App konnte nicht initialisiert werden.");
-                }
                 
                 db = getFirestore(app);
                 auth = getAuth(app);
@@ -252,24 +235,25 @@
                 userId = auth.currentUser?.uid || crypto.randomUUID();
                 document.getElementById('status-message').textContent = `Deine User-ID (Teile diese ID mit anderen): ${userId}`;
                 
-                // Der korrigierte 5-Segment-Pfad wird zur Initialisierung der Sammlung genutzt.
                 albumCollectionRef = collection(db, FULL_COLLECTION_PATH_STRING);
 
                 startAlbumListener();
 
             } catch (error) {
                 console.error("Firebase Initialisierung fehlgeschlagen:", error);
-                alertModal(`Fehler bei der Anmeldung: ${error.message}`, null);
+                const errorMsg = `Kritischer Fehler bei der Firebase-Verbindung: ${error.message}`;
+                document.getElementById('status-message').textContent = errorMsg;
+                document.getElementById('page-left').innerHTML = `<h2 class="text-2xl font-semibold page-header">Verbindungsfehler</h2><p class="text-red-500 p-4">${errorMsg}</p>`;
+                document.getElementById('page-right').classList.add('hidden');
             }
         }
 
         /**
-         * Sets up the real-time listener for the public photo collection.
+         * Richtet den Echtzeit-Listener für die öffentliche Fotosammlung ein.
          */
         function startAlbumListener() {
-            // Prüfung, falls die Initialisierung fehlschlägt, aber der Listener trotzdem aufgerufen wird
             if (!albumCollectionRef) {
-                console.error("Album Collection Reference ist undefiniert. Kann keinen Listener starten.");
+                console.error("Album Collection Reference ist undefiniert.");
                 document.getElementById('page-left').innerHTML = `<p class="text-red-500 p-4">Fehler: Datenbank nicht verbunden.</p>`;
                 return;
             }
@@ -277,44 +261,39 @@
             const q = query(albumCollectionRef); 
 
             onSnapshot(q, (snapshot) => {
-                // Reset data array
+                // Daten-Array zurücksetzen
                 for (let i = 0; i < totalSlots; i++) {
                     albumData[i] = null;
                 }
                 
-                // Fill data array based on explicit slotIndex
+                // Daten-Array basierend auf slotIndex füllen
                 snapshot.forEach((doc) => {
                     const data = doc.data();
                     const slotIndex = data.slotIndex;
-                    // Check if index is valid and fill the slot
                     if (slotIndex !== undefined && slotIndex >= 0 && slotIndex < totalSlots) {
-                        albumData[slotIndex] = { id: doc.id, ...data };
+                        albumData[slotIndex] = { id: doc.id, ...data, authorId: data.authorId || 'unknown' };
                     }
                 });
                 
-                renderBook(); // Re-render the book pages
+                renderBook(); // Buchseiten neu rendern
             }, (error) => {
                 console.error("Fehler beim Abrufen der Fotos:", error);
-                // WICHTIG: Sollte dieser Fehler auftreten, liegt es an der Path-Regel
-                document.getElementById('page-left').innerHTML = `<p class="text-red-500 p-4">Fehler beim Laden des Albums (Path Error: ${error.message}).</p>`;
+                document.getElementById('page-left').innerHTML = `<p class="text-red-500 p-4">Fehler beim Laden des Albums (Sicherheitsregel-Fehler?).</p>`;
             });
         }
 
         /**
-         * Renders the current two visible pages based on the currentPage index.
+         * Rendert die aktuell sichtbaren zwei Seiten basierend auf dem currentPage-Index.
          */
         function renderBook() {
             const pageLeftEl = document.getElementById('page-left');
             const pageRightEl = document.getElementById('page-right');
             
-            // Calculate actual page numbers (1 to 40)
             const leftPageNum = currentPage * 2 + 1;
             const rightPageNum = currentPage * 2 + 2;
 
-            // Render Left Page
             pageLeftEl.innerHTML = renderPageContent(leftPageNum, 'Linke Seite');
             
-            // Render Right Page
             if (rightPageNum <= TOTAL_PAGES) {
                 pageRightEl.innerHTML = renderPageContent(rightPageNum, 'Rechte Seite');
                 pageRightEl.classList.remove('hidden');
@@ -323,20 +302,19 @@
                  pageRightEl.classList.remove('hidden');
             }
             
-            document.getElementById('current-page-display').textContent = `Seite ${leftPageNum} / ${TOTAL_PAGES}`;
+            document.getElementById('current-page-display').textContent = `Seite ${leftPageNum} / ${TOTAL_AGES}`;
             
-            // Attach delete listeners after rendering
+            // Lösch-Listener nach dem Rendern anhängen
             attachDeleteListeners();
         }
 
         /**
-         * Attaches click listeners to all delete buttons rendered in the book.
-         * NOTE: The buttons are only rendered if userId matches authorId.
+         * Hängt Klick-Listener an alle gerenderten Lösch-Buttons an.
          */
         function attachDeleteListeners() {
             document.querySelectorAll('.delete-button').forEach(button => {
                 button.addEventListener('click', (e) => {
-                    e.stopPropagation(); // Prevent page content interactions
+                    e.stopPropagation(); 
                     const docId = button.dataset.docId;
                     const page = button.dataset.page;
                     const slot = button.dataset.slot;
@@ -349,7 +327,7 @@
         }
 
         /**
-         * Generates the HTML content for a single page.
+         * Generiert den HTML-Inhalt für eine einzelne Seite.
          */
         function renderPageContent(pageNumber, title) {
             const startIndex = (pageNumber - 1) * IMAGES_PER_PAGE;
@@ -359,17 +337,19 @@
             for (let i = 0; i < IMAGES_PER_PAGE; i++) {
                 const slotIndex = startIndex + i;
                 const image = albumData[slotIndex];
-                const slotNum = i + 1; // 1-basierte Slot-Nummer
+                const slotNum = i + 1; 
 
                 let slotText = `Klicken, um Foto hinzuzufügen.`;
                 if (image) {
                     slotText = '';
                 }
 
-                // Fügt den Klick-Handler nur hinzu, wenn der Slot leer ist.
+                // Klick-Handler nur hinzufügen, wenn der Slot leer ist.
                 const slotClickableClass = !image ? 'cursor-pointer hover:bg-blue-50 transition duration-150' : '';
+                // HIER WICHTIG: window.openUploadModal muss global sein
                 const clickHandler = !image ? `onclick="window.openUploadModal(${pageNumber}, ${slotNum})"` : '';
                 
+                // Prüfen, ob der aktuelle Benutzer der Autor ist
                 const isDeletable = image && image.authorId === userId;
                 let deleteButtonHtml = '';
 
@@ -389,7 +369,7 @@
                             ? `<img src="${image.url}" alt="${image.caption || 'Album Foto'}" class="w-full h-full object-cover">
                                <div class="absolute inset-0 bg-black bg-opacity-50 text-white p-2 flex flex-col justify-between opacity-0 group-hover:opacity-100 transition-opacity duration-300">
                                    <div class="flex justify-end">
-                                        ${deleteButtonHtml} <!-- Delete Button wird NUR HIER angezeigt, wenn authorId == userId -->
+                                        ${deleteButtonHtml} 
                                    </div>
                                    <div>
                                        <p class="text-xs font-semibold truncate">${image.caption || 'Ohne Beschreibung'}</p>
@@ -407,18 +387,16 @@
         }
 
         /**
-         * Navigation function to change the page set.
-         * @param {number} direction - 1 for next, -1 for previous.
+         * Navigiert zwischen den Seiten.
          */
         function navigatePage(direction) {
             const newPage = currentPage + direction;
-            const totalPageSets = TOTAL_PAGES / 2; // 40 / 2 = 20 total sets
+            const totalPageSets = TOTAL_PAGES / 2; 
             
             if (newPage >= 0 && newPage < totalPageSets) {
                 const pageRightEl = document.getElementById('page-right');
                 const pageLeftEl = document.getElementById('page-left');
                 
-                // Apply the turn effect (for forward and backward)
                 if (direction > 0) {
                      pageRightEl.classList.add('page-turn');
                      pageLeftEl.classList.remove('page-turn');
@@ -426,12 +404,9 @@
                      pageRightEl.classList.remove('page-turn');
                 }
 
-
-                // Wait for the animation to finish before updating state and content
                 setTimeout(() => {
                     currentPage = newPage;
                     renderBook();
-                    // Remove class to reset for the next flip
                     pageRightEl.classList.remove('page-turn'); 
                     updateNavigationButtons();
                 }, 800); 
@@ -440,7 +415,7 @@
         }
         
         /**
-         * Updates the disabled state of the navigation buttons.
+         * Aktualisiert den Status der Navigations-Buttons.
          */
         function updateNavigationButtons() {
             const totalPageSets = TOTAL_PAGES / 2;
@@ -449,33 +424,30 @@
         }
 
         /**
-         * Core logic to add a photo document to Firestore.
+         * Speichert ein neues Foto in Firestore.
          */
         async function processUpload(pageNumber, slotNumber, base64Url, caption) {
             const slotIndex = (pageNumber - 1) * IMAGES_PER_PAGE + (slotNumber - 1);
             
-            // Re-check occupancy just in case
             if (albumData[slotIndex] !== null) {
                 alertModal(`Dieser Platz (Seite ${pageNumber}, Platz ${slotNumber}) ist bereits belegt!`, null);
                 return;
             }
             
-            // WICHTIGE PRÜFUNG: Sicherstellen, dass die Datenbankverbindung steht.
             if (!albumCollectionRef) {
                  alertModal("Album-Verbindung wird noch initialisiert. Bitte warten Sie einen Moment.", null);
                  return;
             }
 
             try {
-                // Add document to Firestore
                 await addDoc(albumCollectionRef, {
                     url: base64Url,
                     caption: caption,
-                    authorId: userId, // Speichere die User-ID des Autors
+                    authorId: userId, 
                     timestamp: serverTimestamp(),
                     page: pageNumber, 
                     slot: slotNumber, 
-                    slotIndex: slotIndex // MANDATORY for rendering order
+                    slotIndex: slotIndex 
                 });
 
                 alertModal(`Foto erfolgreich zu Seite ${pageNumber}, Platz ${slotNumber} hinzugefügt!`, null);
@@ -487,17 +459,16 @@
         }
         
         /**
-         * New modal logic for handling upload input after clicking a slot.
+         * Öffnet das Upload-Modal, nachdem ein leerer Slot angeklickt wurde.
          */
         function openUploadModal(pageNumber, slotNumber) {
             currentUploadContext.page = pageNumber;
             currentUploadContext.slot = slotNumber;
-            currentUploadContext.mode = 'file'; // Default to file upload
+            currentUploadContext.mode = 'file'; 
             
             const modal = document.getElementById('custom-modal');
             const modalContent = document.getElementById('modal-content');
             
-            // Dynamische Generierung des Formularinhalts
             modalContent.innerHTML = `
                 <h3 class="text-lg font-bold text-blue-600 mb-3">Foto zu Seite ${pageNumber}, Platz ${slotNumber} hinzufügen</h3>
                 <p class="text-xs text-yellow-600 mb-4 bg-yellow-50 p-2 rounded-lg border border-yellow-200">
@@ -545,10 +516,8 @@
                 </form>
             `;
             
-            // Initialen Zustand setzen
             setModalUploadMode(currentUploadContext.mode);
 
-            // Event Listeners für das dynamische Formular
             document.getElementById('modal-cancel-button').onclick = () => modal.classList.add('hidden');
             document.getElementById('slot-upload-form').addEventListener('submit', handleModalUploadSubmit);
 
@@ -557,7 +526,7 @@
         }
 
         /**
-         * Toggles the input fields within the upload modal.
+         * Schaltet zwischen Datei-Upload und URL-Eingabe im Modal um.
          */
         function setModalUploadMode(mode) {
             currentUploadContext.mode = mode;
@@ -566,13 +535,11 @@
             const fileButton = document.getElementById('modal-mode-file');
             const urlButton = document.getElementById('modal-mode-url');
 
-            // Elemente prüfen, bevor sie verwendet werden (für den Fall, dass die Funktion zu früh aufgerufen wird)
             if (!fileGroup || !urlGroup || !fileButton || !urlButton) return;
 
             fileGroup.classList.toggle('hidden', mode === 'url');
             urlGroup.classList.toggle('hidden', mode === 'file');
             
-            // Update button visual
             fileButton.classList.toggle('bg-blue-600', mode === 'file');
             fileButton.classList.toggle('text-white', mode === 'file');
             fileButton.classList.toggle('bg-gray-200', mode === 'url');
@@ -585,7 +552,7 @@
         }
         
         /**
-         * Handles the submission of the upload form within the modal.
+         * Verarbeitet die Übermittlung des Upload-Formulars.
          */
         async function handleModalUploadSubmit(event) {
             event.preventDefault();
@@ -603,7 +570,7 @@
             addButton.textContent = 'Lade Bild hoch...';
             
             try {
-                // 1. Get Base64 URL based on Upload Mode
+                // 1. Base64-URL basierend auf dem Modus abrufen
                 if (mode === 'file') {
                     const fileInput = document.getElementById('modal-photo-file');
                     const file = fileInput ? fileInput.files[0] : null;
@@ -618,42 +585,32 @@
                     base64Url = await fetchImageAsBase64(url);
                 }
                 
-                // 2. Process and Save
+                // 2. Speichern
                 await processUpload(pageNumber, slotNumber, base64Url, caption);
                 
-                // 3. Close Modal on success (processUpload displays final alert)
                 modal.classList.add('hidden');
 
             } catch (e) {
-                 // Error handling is complex, use the generic alertModal
                  const errorMsg = e.message.includes("File too large") || e.message.includes("URL too large") ? "Das Bild ist zu groß (max. 500 KB)." : e.message;
                  alertModal(`Fehler beim Hochladen: ${errorMsg}`, null);
             } finally {
-                // Restore button state
+                // Button-Zustand wiederherstellen
                 addButton.disabled = false;
                 addButton.textContent = 'Hinzufügen';
             }
         }
 
         /**
-         * Handles the deletion of a document from Firestore.
-         * @param {string} docId - The ID of the document to delete.
-         * @param {string} pageNumber - Page number for display.
-         * @param {string} slotNumber - Slot number for display.
+         * Löscht ein Dokument aus Firestore.
          */
         function deletePhoto(docId, pageNumber, slotNumber) {
             
-            // NOTE: We rely on the client-side check (button only visible to author) 
-            // and security rules on the server for full protection.
-            
             alertModal(`Möchtest du DEIN Foto auf Seite ${pageNumber}, Platz ${slotNumber} wirklich löschen?`, async () => {
-                // WICHTIGE PRÜFUNG: Sicherstellen, dass die Datenbankverbindung steht.
                 if (!db) {
                     alertModal("Datenbankverbindung wird hergestellt. Bitte warten.", null);
                     return;
                 }
                 try {
-                    // Löschung mit dem korrigierten Pfadstring
                     await deleteDoc(doc(db, FULL_COLLECTION_PATH_STRING, docId));
                     alertModal(`Foto erfolgreich gelöscht.`, null);
                 } catch (error) {
@@ -663,25 +620,21 @@
             });
         }
         
-        // Macht die Funktion global zugänglich für Klicks aus dem HTML
+        // --- Globale Helfer-Funktionen (erforderlich für HTML-onclick) ---
         window.deletePhoto = deletePhoto;
         window.openUploadModal = openUploadModal;
-        window.setModalUploadMode = setModalUploadMode; // Für den Klick im dynamischen Modal
-
+        window.setModalUploadMode = setModalUploadMode; 
 
         /**
-         * Custom modal replacement for alert() and confirmation.
-         * IMPORTANT: This is for simple alerts/confirms only, NOT for complex input forms.
+         * Custom Modal Ersatz für alert() und confirm().
          */
         function alertModal(message, onConfirm = null) {
-            // Revert content to standard alert/confirm layout
             const modal = document.getElementById('custom-modal');
             modal.classList.remove('hidden');
             modal.style.display = 'flex';
             
             const modalContent = document.getElementById('modal-content');
             
-            // Dynamischer Inhalt für einfache Benachrichtigung/Bestätigung
             modalContent.innerHTML = `
                 <h3 class="text-lg font-bold text-blue-600 mb-3">Album-Benachrichtigung</h3>
                 <p id="modal-message-simple" class="text-gray-700">${message}</p>
@@ -708,15 +661,15 @@
             }
         }
 
-        // --- Event Listeners and Initial Load ---
+        // --- Event Listeners und Initialer Ladevorgang ---
         window.onload = () => {
+            // Die Initialisierung von Firebase kann fehlschlagen, wird aber jetzt defensiv gehandhabt.
             initializeAppAndAuth();
             
-            // Navigation Event Listeners
             document.getElementById('prev-page').addEventListener('click', () => navigatePage(-1));
             document.getElementById('next-page').addEventListener('click', () => navigatePage(1));
             
-            // Initial rendering and button state update
+            // Initiales Rendern (wird vom Listener überschrieben, falls erfolgreich)
             renderBook();
             updateNavigationButtons();
         };
@@ -726,7 +679,7 @@
 
     <div class="album-container">
         
-        <!-- Header and Status -->
+        <!-- Header und Status -->
         <header class="text-center mb-6">
             <h1 class="text-5xl font-extrabold text-[#5d4037] tracking-wider font-['Playfair_Display']">Unser Buch-Album</h1>
             <p class="text-gray-600 mt-2">Kollaboratives Fotoalbum mit 40 Seiten (6 Bilder pro Seite).</p>
@@ -736,17 +689,21 @@
             </div>
         </header>
 
-        <!-- The Book Structure -->
+        <!-- Die Buchstruktur -->
         <div class="book">
+            <!-- Die Seiten bleiben leer, bis das Skript sie füllt. -->
             <div id="page-left" class="page left-page shadow-2xl">
-                <!-- Content loaded by JS -->
+                <div class="p-8 text-center text-gray-500">
+                    <p>Lade Album...</p>
+                    <p class="mt-4 text-xs text-red-400">Falls dieser Text bleibt, liegt ein Initialisierungsfehler vor. Bitte überprüfe die Konsole.</p>
+                </div>
             </div>
             <div id="page-right" class="page right-page shadow-2xl">
-                 <!-- Content loaded by JS -->
+                 
             </div>
         </div>
 
-        <!-- Navigation Buttons -->
+        <!-- Navigations-Buttons -->
         <div class="flex justify-center space-x-4 mt-8">
             <button id="prev-page" class="px-6 py-2 bg-gray-300 text-gray-800 font-semibold rounded-full shadow-md hover:bg-gray-400 disabled:opacity-50 transition duration-150">
                 &larr; Vorherige Seite
@@ -758,10 +715,10 @@
         
     </div>
 
-    <!-- Custom Modal for Alerts/Confirmation/Upload (Inhalt wird dynamisch in JS eingefügt) -->
+    <!-- Custom Modal für Alerts/Confirmation/Upload -->
     <div id="custom-modal" class="hidden fixed inset-0 z-50 overflow-y-auto bg-gray-900 bg-opacity-60 flex items-center justify-center">
         <div id="modal-content" class="bg-white rounded-xl shadow-2xl p-6 m-4 max-w-sm w-full transform scale-100 transition-all duration-300">
-            <!-- Content is injected dynamically by JS (alertModal or openUploadModal) -->
+            <!-- Inhalt wird dynamisch injiziert -->
         </div>
     </div>
 
